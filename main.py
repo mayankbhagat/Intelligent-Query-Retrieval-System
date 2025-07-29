@@ -183,7 +183,7 @@ class RunRequest(BaseModel):
     documents: str = Field(..., description="URL to the document (PDF, DOCX, EML).")
     questions: List[str] = Field(..., description="List of natural language questions.")
 
-class RunResponse(Baseodel):
+class RunResponse(BaseModel):
     answers: List[str] = Field(..., description="List of answers corresponding to the questions.")
 
 # --- API Endpoint ---
