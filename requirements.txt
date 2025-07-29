@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+langchain
+langchain-google-genai
+langchain-community
+langchain-text-splitters
+pydantic
+python-dotenv
+pdfplumber
+requests # <--- ADD THIS LINE
+tiktoken
+pypdf
