@@ -4,7 +4,7 @@ import io
 import requests
 import asyncio # For handling async event loop
 import hashlib # For creating a unique hash for document URLs
-
+import tempfile
 from typing import List, Dict, Optional
 from fastapi import FastAPI, Request, HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -77,11 +77,38 @@ async def download_and_process_document(doc_url: str) -> List[Dict]:
     """Downloads document from URL and returns LangChain Document objects."""
     print(f"Attempting to download and process: {doc_url}")
     try:
-        response = requests.get(doc_url, stream=True, timeout=15) # Increased timeout
-        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+        response = requests.get(doc_url, stream=True, timeout=15)
+        response.raise_for_status()
 
         content_type = response.headers.get('Content-Type', '').lower()
         file_extension = doc_url.split('.')[-1].lower()
+
+        if 'pdf' in content_type or file_extension == 'pdf':
+            # --- MODIFIED PDF PROCESSING ---
+            # Create a temporary file to save the PDF content
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
+                temp_file.write(response.content)
+                temp_file_path = temp_file.name
+
+            try:
+                loader = PyPDFLoader(temp_file_path) # Pass the file path
+                docs = loader.load()
+                print(f"Successfully loaded {len(docs)} pages from PDF.")
+                return docs
+            finally:
+                # Ensure the temporary file is deleted
+                if os.path.exists(temp_file_path):
+                    os.remove(temp_file_path)
+            # --- END MODIFIED PDF PROCESSING ---
+        else:
+            raise ValueError(f"Unsupported document type: {content_type} / .{file_extension}. Only PDFs are directly supported in this implementation.")
+
+    except requests.exceptions.RequestException as e:
+        print(f"Network or download error for {doc_url}: {e}")
+        raise HTTPException(status_code=422, detail=f"Failed to download document from URL: {e}")
+    except Exception as e:
+        print(f"Error processing document {doc_url}: {e}")
+        raise HTTPException(status_code=422, detail=f"Error processing document content: {e}")
 
         # For Hackathon, focus on PDF as it's common. DOCX/Email need more robust loaders.
         if 'pdf' in content_type or file_extension == 'pdf':
