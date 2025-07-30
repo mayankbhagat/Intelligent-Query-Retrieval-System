@@ -214,10 +214,10 @@ class RunResponse(BaseModel):
     answers: List[str] = Field(..., description="List of answers corresponding to the questions.")
 
 # --- API Endpoint ---
-@app.post("/hackrx/run", response_model=RunResponse, status_code=status.HTTP_200_OK)
+@app.post("/api/v1/hackrx/run", response_model=RunResponse, status_code=status.HTTP_200_OK)
 async def run_submission(
     request_body: RunRequest,
-    auth_token: str = Depends(verify_token) # Authentication
+    auth_token: str = Depends(verify_token)
 ):
     print(f"Received request for document: {request_body.documents} with {len(request_body.questions)} questions.")
     answers = []
