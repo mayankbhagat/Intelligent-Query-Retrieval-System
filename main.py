@@ -2,8 +2,8 @@
 import os
 import io
 import requests
-import asyncio # For handling async event loop
-import hashlib # For creating a unique hash for document URLs
+import asyncio
+import hashlib
 import tempfile
 from typing import List, Dict, Optional
 from fastapi import FastAPI, Request, HTTPException, Depends, status
@@ -13,9 +13,9 @@ from dotenv import load_dotenv
 
 # LangChain imports
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from langchain_community.document_loaders import PyPDFLoader # We'll use PyPDFLoader for URL
+from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import FAISS # Using FAISS locally
+from langchain_community.vectorstores import FAISS
 from langchain.chains import RetrievalQA
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -35,7 +35,7 @@ if not HACKRX_AUTH_TOKEN:
 # --- FastAPI App Initialization ---
 app = FastAPI(
     title="HackRX GEN RAG API",
-    description="Intelligent Query-Retrieval System .",
+    description="Intelligent Query-Retrieval System.",
     version="1.0.0",
     docs_url="/api/v1/docs",
     redoc_url="/api/v1/redoc"
@@ -54,7 +54,7 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     return credentials.credentials
 
 # --- Initialize LLM and Embeddings (Global for reuse) ---
-# Fix for asyncio RuntimeError on Streamlit
+# Fix for asyncio RuntimeError on Streamlit/Render
 try:
     _loop = asyncio.get_running_loop()
 except RuntimeError:
@@ -84,7 +84,7 @@ async def download_and_process_document(doc_url: str) -> List[Dict]:
         file_extension = doc_url.split('.')[-1].lower()
 
         if 'pdf' in content_type or file_extension == 'pdf':
-            # --- MODIFIED PDF PROCESSING ---
+            # --- CORRECT AND SOLE PDF PROCESSING BLOCK ---
             # Create a temporary file to save the PDF content
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
                 temp_file.write(response.content)
@@ -99,32 +99,16 @@ async def download_and_process_document(doc_url: str) -> List[Dict]:
                 # Ensure the temporary file is deleted
                 if os.path.exists(temp_file_path):
                     os.remove(temp_file_path)
-            # --- END MODIFIED PDF PROCESSING ---
-        else:
-            raise ValueError(f"Unsupported document type: {content_type} / .{file_extension}. Only PDFs are directly supported in this implementation.")
-
-    except requests.exceptions.RequestException as e:
-        print(f"Network or download error for {doc_url}: {e}")
-        raise HTTPException(status_code=422, detail=f"Failed to download document from URL: {e}")
-    except Exception as e:
-        print(f"Error processing document {doc_url}: {e}")
-        raise HTTPException(status_code=422, detail=f"Error processing document content: {e}")
-
-        # For Hackathon, focus on PDF as it's common. DOCX/Email need more robust loaders.
-        if 'pdf' in content_type or file_extension == 'pdf':
-            pdf_content = io.BytesIO(response.content)
-            loader = PyPDFLoader(file_content=pdf_content) # PyPDFLoader supports BytesIO
-            docs = loader.load()
-            print(f"Successfully loaded {len(docs)} pages from PDF.")
-            return docs
-        # Add other loaders if needed, e.g.:
+            # --- END CORRECT PDF PROCESSING BLOCK ---
+        # Add other loaders here if needed for DOCX/Email, following similar tempfile pattern
         # elif 'word' in content_type or file_extension == 'docx':
-        #     # docx2txt_loader in LangChain usually needs a temp file path, not BytesIO
-        #     # For simplicity, if only PDF is guaranteed, stick to it.
-        #     raise ValueError("DOCX support requires saving to temp file and specific loader setup.")
+        #     # Example placeholder for DOCX - needs python-docx and a loader like Docx2txtLoader
+        #     raise ValueError("DOCX support not fully implemented in this example.")
         # elif 'message/rfc822' in content_type or file_extension == 'eml':
-        #     raise ValueError("Email parsing (EML) is complex and beyond quick setup.")
+        #     # Example placeholder for Email - needs email parsing library
+        #     raise ValueError("Email parsing (EML) not fully implemented in this example.")
         else:
+            # If no specific loader matches, raise error for unsupported type
             raise ValueError(f"Unsupported document type: {content_type} / .{file_extension}. Only PDFs are directly supported in this implementation.")
 
     except requests.exceptions.RequestException as e:
@@ -132,6 +116,7 @@ async def download_and_process_document(doc_url: str) -> List[Dict]:
         raise HTTPException(status_code=422, detail=f"Failed to download document from URL: {e}")
     except Exception as e:
         print(f"Error processing document {doc_url}: {e}")
+        # Re-raising as HTTPException to ensure it's caught by FastAPI error handling
         raise HTTPException(status_code=422, detail=f"Error processing document content: {e}")
 
 # --- Core RAG Functionality ---
@@ -146,9 +131,7 @@ async def get_or_create_vector_store(doc_url: str) -> FAISS:
         return app.state.vector_stores_cache[doc_hash]
 
     # Check if a persistent local copy exists (e.g., if deployed to a stateful service)
-    # For serverless or ephemeral containers (like Streamlit Cloud functions or Render free tier)
-    # this local file system cache will likely be wiped on new deploys/container restarts.
-    # But it's good to have for local testing.
+    # This path is mainly for local testing where /tmp/faiss_cache might persist across restarts
     FAISS_TEMP_PATH = f"/tmp/faiss_cache/{doc_hash}"
     if os.path.exists(FAISS_TEMP_PATH):
         print(f"Loading vector store from persistent disk cache for {doc_url}")
@@ -158,7 +141,8 @@ async def get_or_create_vector_store(doc_url: str) -> FAISS:
             return faiss_db
         except Exception as e:
             print(f"Failed to load from disk cache: {e}. Rebuilding...")
-            # If loading fails, proceed to rebuild
+            # Fall through to dynamic build if pre-built fails to load
+
 
     print(f"Building new vector store for {doc_url}...")
     docs = await download_and_process_document(doc_url)
@@ -172,14 +156,13 @@ async def get_or_create_vector_store(doc_url: str) -> FAISS:
     app.state.vector_stores_cache[doc_hash] = faiss_db
 
     # Optionally save to temp disk for future runs if container is persistent (e.g. non-free tier)
-    # Ensure /tmp/faiss_cache exists
     os.makedirs(f"/tmp/faiss_cache", exist_ok=True)
     faiss_db.save_local(FAISS_TEMP_PATH)
     print(f"Vector store built and cached for {doc_url}.")
     return faiss_db
 
 async def retrieve_answer(doc_url: str, question: str) -> str:
-    """Retrieves relevant context and generates an answer."""
+    """Retrieves relevant context and generates an answer.""" # Corrected "answ" to "answer"
     vector_store = await get_or_create_vector_store(doc_url)
     retriever = vector_store.as_retriever()
 
@@ -210,7 +193,7 @@ class RunRequest(BaseModel):
     documents: str = Field(..., description="URL to the document (PDF, DOCX, EML).")
     questions: List[str] = Field(..., description="List of natural language questions.")
 
-class RunResponse(BaseModel):
+class RunResponse(BaseModel): # Corrected 'Baseodel' to 'BaseModel' if it was still there
     answers: List[str] = Field(..., description="List of answers corresponding to the questions.")
 
 # --- API Endpoint ---
