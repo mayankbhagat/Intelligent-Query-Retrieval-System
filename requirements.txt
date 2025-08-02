@@ -10,3 +10,4 @@ pdfplumber
 requests # <--- ADD THIS LINE
 tiktoken
 pypdf
+# Trigger Vercel Deploy 2025-08-03
